@@ -152,41 +152,40 @@ sequenceDiagram
     participant C as Client
     participant AC as AuthController
     participant AS as AuthService
-    participant UR as UserRepository
-    participant PE as PasswordEncoder
-    participant AM as AuthenticationManager
-    participant JP as JwtTokenProvider
+    participant DB as UserRepository
+    participant AM as AuthManager
+    participant JP as JwtProvider
 
+    rect rgb(230, 245, 255)
     Note over C,JP: Registration Flow
-    C->>AC: POST /api/auth/register {username, email, password}
+    C->>AC: POST /api/auth/register
     AC->>AS: register(RegisterRequest)
-    AS->>UR: existsByUsername(username)
-    UR-->>AS: false
-    AS->>UR: existsByEmail(email)
-    UR-->>AS: false
-    AS->>PE: encode(password)
-    PE-->>AS: encodedPassword
-    AS->>UR: save(User)
-    AS->>AM: authenticate(UsernamePasswordAuthenticationToken)
+    AS->>DB: existsByUsername
+    DB-->>AS: false
+    AS->>DB: existsByEmail
+    DB-->>AS: false
+    AS->>AS: encode password BCrypt
+    AS->>DB: save(User)
+    AS->>AM: authenticate
     AM-->>AS: Authentication
-    AS->>JP: generateToken(authentication)
+    AS->>JP: generateToken
     JP-->>AS: jwtToken
-    AS-->>AC: AuthResponse(token, username, role)
-    AC-->>C: 200 OK + AuthResponse
+    AS-->>C: AuthResponse token
+    end
 
+    rect rgb(255, 245, 230)
     Note over C,JP: Login Flow
-    C->>AC: POST /api/auth/login {username, password}
+    C->>AC: POST /api/auth/login
     AC->>AS: login(LoginRequest)
-    AS->>AM: authenticate(UsernamePasswordAuthenticationToken)
-    AM->>AM: Load user via CustomUserDetailsService
-    AM->>AM: Verify BCrypt password
+    AS->>AM: authenticate
+    AM->>AM: Load user verify BCrypt
     AM-->>AS: Authentication
-    AS->>JP: generateToken(authentication)
+    AS->>JP: generateToken
     JP-->>AS: jwtToken
-    AS->>UR: findByUsername(username)
-    UR-->>AS: User
-    AS-->>AC: AuthResponse(token, username, role)
-    AC-->>C: 200 OK + AuthResponse
+    AS->>DB: findByUsername
+    DB-->>AS: User
+    AS-->>C: AuthResponse token
+    end
 ```
 
 ### Request Authentication Flow (JWT Filter)
@@ -210,22 +209,22 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    A[Incoming Request] --> B{Path matches /api/auth/**?}
-    B -->|Yes| C[permitAll - No auth required]
-    B -->|No| D{Path matches /actuator/health?}
-    D -->|Yes| E[permitAll - No auth required]
-    D -->|No| F{Path matches /api/admin/**?}
-    F -->|Yes| G{hasRole ADMIN?}
-    F -->|No| H{Path matches GET /api/products,articles,logs,...?}
-    H -->|Yes| I[authenticated - Any valid JWT]
-    H -->|No| J[.anyRequest().authenticated]
-    
-    G -->|Admin role| K[Access granted]
-    G -->|Non-admin| L[403 Forbidden]
+    A["Incoming Request"] --> B{"Path matches /api/auth/**?"}
+    B -->|Yes| C["permitAll - No auth required"]
+    B -->|No| D{"Path matches /actuator/health?"}
+    D -->|Yes| E["permitAll - No auth required"]
+    D -->|No| F{"Path matches /api/admin/**?"}
+    F -->|Yes| G{"hasRole ADMIN?"}
+    F -->|No| H{"Path matches GET /api/products,articles,logs...?"}
+    H -->|Yes| I["authenticated - Any valid JWT"]
+    H -->|No| J["anyRequest - authenticated"]
+
+    G -->|Admin role| K["Access granted"]
+    G -->|Non-admin| L["403 Forbidden"]
     I -->|Valid token| K
-    I -->|No/invalid token| M[401 Unauthorized]
+    I -->|No or invalid token| M["401 Unauthorized"]
     J -->|Valid token| K
-    J -->|No/invalid token| M
+    J -->|No or invalid token| M
 ```
 
 ### Product CRUD Flow
