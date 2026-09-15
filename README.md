@@ -112,549 +112,355 @@ cassandra_app (SimpleStrategy, replication_factor = 1)
 
 ### Application Startup Flow
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                  SPRING BOOT STARTUP                     │
-└─────────────────────────┬───────────────────────────────┘
-                          │
-                          ▼
-┌─────────────────────────────────────────────────────────┐
-│              CassandraConfig (Two-Phase Init)            │
-│                                                         │
-│  Phase 1: Admin Session (no keyspace)                   │
-│  ┌─────────────────────────────────────────────┐        │
-│  │ 1. Connect to Cassandra (no keyspace)       │        │
-│  │ 2. CREATE KEYSPACE IF NOT EXISTS            │        │
-│  │    cassandra_app (SimpleStrategy, RF=1)     │        │
-│  │ 3. CREATE TYPE IF NOT EXISTS review         │        │
-│  │ 4. CREATE TYPE IF NOT EXISTS coordinate     │        │
-│  │ 5. CREATE TYPE IF NOT EXISTS address        │        │
-│  └─────────────────────────────────────────────┘        │
-│                                                         │
-│  Phase 2: Application Session (with keyspace)           │
-│  ┌─────────────────────────────────────────────┐        │
-│  │ 1. Connect to cassandra_app keyspace        │        │
-│  │ 2. Spring Data auto-creates 9 tables        │        │
-│  │    (schema-action: create_if_not_exists)     │        │
-│  │ 3. Spring Data auto-creates indexes         │        │
-│  └─────────────────────────────────────────────┘        │
-└─────────────────────────┬───────────────────────────────┘
-                          │
-                          ▼
-┌─────────────────────────────────────────────────────────┐
-│              ViewInitializer (CommandLineRunner)         │
-│                                                         │
-│  Creates 6 materialized views on startup:               │
-│  products_by_category, articles_by_author,              │
-│  logs_by_level, locations_by_country,                   │
-│  employees_by_department, events_by_type                │
-└─────────────────────────┬───────────────────────────────┘
-                          │
-                          ▼
-┌─────────────────────────────────────────────────────────┐
-│              Tomcat starts on port 8080                  │
-│              Application READY                           │
-└─────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    A[Spring Boot Startup] --> B[CassandraConfig - Two-Phase Init]
+    
+    subgraph Phase1["Phase 1: Admin Session (no keyspace)"]
+        B --> C[Connect to Cassandra without keyspace]
+        C --> D[CREATE KEYSPACE IF NOT EXISTS cassandra_app]
+        D --> E[CREATE TYPE IF NOT EXISTS review]
+        E --> F[CREATE TYPE IF NOT EXISTS coordinate]
+        F --> G[CREATE TYPE IF NOT EXISTS address]
+    end
+    
+    subgraph Phase2["Phase 2: Application Session (with keyspace)"]
+        G --> H[Connect to cassandra_app keyspace]
+        H --> I[Spring Data auto-creates 9 tables]
+        I --> J[Spring Data auto-creates indexes]
+    end
+    
+    J --> K[ViewInitializer - CommandLineRunner]
+    
+    subgraph Views["Materialized Views Created"]
+        K --> V1[products_by_category]
+        K --> V2[articles_by_author]
+        K --> V3[logs_by_level]
+        K --> V4[locations_by_country]
+        K --> V5[employees_by_department]
+        K --> V6[events_by_type]
+    end
+    
+    V1 & V2 & V3 & V4 & V5 & V6 --> L[Tomcat starts on port 8080]
+    L --> M[Application READY]
 ```
 
 ### Authentication Flow (JWT)
 
-```
-┌──────────┐     POST /api/auth/register      ┌──────────────┐
-│  Client   │ ──────────────────────────────▶  │ AuthController│
-│           │   {username, email, password}    │              │
-└──────────┘                                  └──────┬───────┘
-                                                     │
-                                                     ▼
-                                              ┌──────────────┐
-                                              │  AuthService  │
-                                              │              │
-                                              │ 1. Check if   │
-                                              │    username   │
-                                              │    exists     │
-                                              │ 2. Encode     │
-                                              │    password   │
-                                              │    (BCrypt)   │
-                                              │ 3. Save User  │
-                                              │ 4. Authenticate│
-                                              │ 5. Generate   │
-                                              │    JWT token  │
-                                              └──────┬───────┘
-                                                     │
-                                                     ▼
-                                              ┌──────────────┐
-                                              │ AuthResponse  │
-                                              │ {token, user, │
-                                              │  role}        │
-                                              └──────────────┘
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant AC as AuthController
+    participant AS as AuthService
+    participant UR as UserRepository
+    participant PE as PasswordEncoder
+    participant AM as AuthenticationManager
+    participant JP as JwtTokenProvider
 
-┌──────────┐     POST /api/auth/login        ┌──────────────┐
-│  Client   │ ──────────────────────────────▶  │ AuthController│
-│           │   {username, password}          │              │
-└──────────┘                                  └──────┬───────┘
-                                                     │
-                                                     ▼
-                                              ┌──────────────┐
-                                              │  AuthService  │
-                                              │              │
-                                              │ 1. Authenticate│
-                                              │    via        │
-                                              │    AuthenticationManager│
-                                              │ 2. Load user  │
-                                              │    via CustomUserDetailsService│
-                                              │ 3. Verify     │
-                                              │    BCrypt     │
-                                              │    password   │
-                                              │ 4. Generate   │
-                                              │    JWT token  │
-                                              └──────┬───────┘
-                                                     │
-                                                     ▼
-                                              ┌──────────────┐
-                                              │ AuthResponse  │
-                                              │ {token, user, │
-                                              │  role}        │
-                                              └──────────────┘
+    Note over C,JP: Registration Flow
+    C->>AC: POST /api/auth/register {username, email, password}
+    AC->>AS: register(RegisterRequest)
+    AS->>UR: existsByUsername(username)
+    UR-->>AS: false
+    AS->>UR: existsByEmail(email)
+    UR-->>AS: false
+    AS->>PE: encode(password)
+    PE-->>AS: encodedPassword
+    AS->>UR: save(User)
+    AS->>AM: authenticate(UsernamePasswordAuthenticationToken)
+    AM-->>AS: Authentication
+    AS->>JP: generateToken(authentication)
+    JP-->>AS: jwtToken
+    AS-->>AC: AuthResponse(token, username, role)
+    AC-->>C: 200 OK + AuthResponse
+
+    Note over C,JP: Login Flow
+    C->>AC: POST /api/auth/login {username, password}
+    AC->>AS: login(LoginRequest)
+    AS->>AM: authenticate(UsernamePasswordAuthenticationToken)
+    AM->>AM: Load user via CustomUserDetailsService
+    AM->>AM: Verify BCrypt password
+    AM-->>AS: Authentication
+    AS->>JP: generateToken(authentication)
+    JP-->>AS: jwtToken
+    AS->>UR: findByUsername(username)
+    UR-->>AS: User
+    AS-->>AC: AuthResponse(token, username, role)
+    AC-->>C: 200 OK + AuthResponse
 ```
 
 ### Request Authentication Flow (JWT Filter)
 
-```
-┌──────────┐   GET /api/products            ┌──────────────────────┐
-│  Client   │   Authorization: Bearer <jwt> │  JwtAuthentication   │
-│           │ ─────────────────────────────▶ │  Filter              │
-└──────────┘                                └──────────┬───────────┘
-                                                       │
-                                                       ▼
-                                            ┌──────────────────────┐
-                                            │ 1. Extract token     │
-                                            │    from Header       │
-                                            │ 2. Validate token    │
-                                            │    (JwtTokenProvider)│
-                                            │ 3. Extract username  │
-                                            │ 4. Load UserDetails  │
-                                            │    (CustomUserDetailsService)│
-                                            │ 5. Set SecurityContext│
-                                            └──────────┬───────────┘
-                                                       │
-                                                       ▼
-                                            ┌──────────────────────┐
-                                            │  Controller processes │
-                                            │  request with auth    │
-                                            │  context              │
-                                            └──────────────────────┘
+```mermaid
+flowchart TD
+    A[Client Request + Bearer JWT] --> B[JwtAuthenticationFilter]
+    B --> C{Token in Header?}
+    C -->|No| D[Continue filter chain - unauthenticated]
+    C -->|Yes| E[Extract token from Authorization header]
+    E --> F[JwtTokenProvider.validateToken]
+    F -->|Invalid| G[Return 401 Unauthorized]
+    F -->|Valid| H[Extract username from token]
+    H --> I[CustomUserDetailsService.loadUserByUsername]
+    I --> J[Create UsernamePasswordAuthenticationToken]
+    J --> K[Set SecurityContextHolder context]
+    K --> L[Controller processes request with auth context]
 ```
 
 ### Security Rules Flow
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                    REQUEST INCOMING                       │
-└─────────────────────────┬───────────────────────────────┘
-                          │
-                          ▼
-               ┌─────────────────────┐
-               │  Path matches       │
-               │  /api/auth/** ?     │
-               └─────┬───────┬───────┘
-                     │ YES   │ NO
-                     ▼       ▼
-              ┌─────────┐  ┌─────────────────────┐
-              │ permitAll│  │  Path matches       │
-              │ (no auth)│  │  /actuator/health?  │
-              └─────────┘  └──┬──────────┬────────┘
-                              │ YES      │ NO
-                              ▼          ▼
-                       ┌─────────┐  ┌──────────────────┐
-                       │permitAll│  │ Path matches      │
-                       └─────────┘  │ /api/admin/** ?   │
-                                    └──┬──────────┬─────┘
-                                       │ YES      │ NO
-                                       ▼          ▼
-                                ┌──────────┐  ┌──────────────┐
-                                │hasRole   │  │authenticated │
-                                │("ADMIN") │  │ (any user)   │
-                                └──────────┘  └──────────────┘
+```mermaid
+flowchart TD
+    A[Incoming Request] --> B{Path matches /api/auth/**?}
+    B -->|Yes| C[permitAll - No auth required]
+    B -->|No| D{Path matches /actuator/health?}
+    D -->|Yes| E[permitAll - No auth required]
+    D -->|No| F{Path matches /api/admin/**?}
+    F -->|Yes| G{hasRole ADMIN?}
+    F -->|No| H{Path matches GET /api/products,articles,logs,...?}
+    H -->|Yes| I[authenticated - Any valid JWT]
+    H -->|No| J[.anyRequest().authenticated]
+    
+    G -->|Admin role| K[Access granted]
+    G -->|Non-admin| L[403 Forbidden]
+    I -->|Valid token| K
+    I -->|No/invalid token| M[401 Unauthorized]
+    J -->|Valid token| K
+    J -->|No/invalid token| M
 ```
 
 ### Product CRUD Flow
 
-```
-┌──────────┐                                ┌────────────────────┐
-│  Client   │                                │ ProductController   │
-└─────┬────┘                                └─────────┬──────────┘
-      │                                                │
-      │ POST /api/products                             │
-      │ {name, category, price, ...}                   │
-      │ ──────────────────────────────────────────────▶ │
-      │                                                │
-      │                                    ┌───────────┴──────────┐
-      │                                    │ ProductService.save() │
-      │                                    │                      │
-      │                                    │ 1. Set UUID          │
-      │                                    │ 2. Set timestamps    │
-      │                                    │ 3. Set defaults      │
-      │                                    │    (available=true)  │
-      │                                    │ 4. repository.save() │
-      │                                    └───────────┬──────────┘
-      │                                                │
-      │                                    ┌───────────┴──────────┐
-      │                                    │ ProductRepository     │
-      │                                    │ (Spring Data)        │
-      │                                    │                      │
-      │                                    │ INSERT INTO products │
-      │                                    │ (...) VALUES (...)   │
-      │                                    └───────────┬──────────┘
-      │                                                │
-      │ ◀──────────────────────────────────────────────│
-      │  200 OK + Product JSON                         │
-      │                                                │
-      │ GET /api/products/search/category/electronics  │
-      │ ──────────────────────────────────────────────▶ │
-      │                                                │
-      │                                    ┌───────────┴──────────┐
-      │                                    │ ProductRepository     │
-      │                                    │ .findByCategory()    │
-      │                                    │                      │
-      │                                    │ SELECT * FROM products│
-      │                                    │ WHERE category = ?   │
-      │                                    │ ALLOW FILTERING      │
-      │                                    └───────────┬──────────┘
-      │                                                │
-      │ ◀──────────────────────────────────────────────│
-      │  200 OK + List<Product> JSON                   │
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant PC as ProductController
+    participant PS as ProductService
+    participant PR as ProductRepository
+    participant DB as Cassandra
+
+    Note over C,DB: Create Product
+    C->>PC: POST /api/products {name, category, price, ...}
+    PC->>PS: save(ProductRequest)
+    PS->>PS: Set UUID, timestamps, defaults
+    PS->>PR: save(Product)
+    PR->>DB: INSERT INTO products (...)
+    DB-->>PR: Ack
+    PR-->>PS: Product
+    PS-->>PC: Product
+    PC-->>C: 200 OK + Product JSON
+
+    Note over C,DB: Search by Category
+    C->>PC: GET /api/products/search/category/electronics
+    PC->>PR: findByCategory("electronics")
+    PR->>DB: SELECT * FROM products WHERE category = ? ALLOW FILTERING
+    DB-->>PR: ResultSet
+    PR-->>PC: List<Product>
+    PC-->>C: 200 OK + List<Product> JSON
 ```
 
 ### Time-Series Data Flow (Sensor Readings)
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    SENSOR READING FLOW                        │
-│                                                              │
-│  Composite Primary Key:                                     │
-│  ┌─────────────────────────────────────────────────┐        │
-│  │ Partition Key: sensor_id (UUID)                  │        │
-│  │ Clustering Key: reading_time (TIMESTAMP) ASC     │        │
-│  └─────────────────────────────────────────────────┘        │
-│                                                              │
-│  WRITE:                                                     │
-│  POST /api/sensors/{sensorId}/readings                      │
-│  ┌─────────────────────────────────────────────┐            │
-│  │ 1. Create SensorReadingKey(sensorId, now()) │            │
-│  │ 2. Create SensorReading(key, value, unit)   │            │
-│  │ 3. repository.save()                        │            │
-│  │    INSERT INTO sensor_readings              │            │
-│  │    (sensor_id, reading_time, value, unit)   │            │
-│  └─────────────────────────────────────────────┘            │
-│                                                              │
-│  READ (by sensor + time range):                             │
-│  GET /api/sensors/{id}/readings/range?start=&end=           │
-│  ┌─────────────────────────────────────────────┐            │
-│  │ SELECT * FROM sensor_readings               │            │
-│  │ WHERE sensor_id = ?                         │            │
-│  │ AND reading_time >= ? AND reading_time <= ?  │            │
-│  │ ORDER BY reading_time ASC                   │            │
-│  └─────────────────────────────────────────────┘            │
-│                                                              │
-│  READ (latest N readings):                                  │
-│  GET /api/sensors/{id}/readings/latest?limit=10             │
-│  ┌─────────────────────────────────────────────┐            │
-│  │ SELECT * FROM sensor_readings               │            │
-│  │ WHERE sensor_id = ?                         │            │
-│  │ ORDER BY reading_time DESC LIMIT ?          │            │
-│  └─────────────────────────────────────────────┘            │
-└─────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph CompositeKey["Composite Primary Key"]
+        PK[Partition Key: sensor_id UUID]
+        CK[Clustering Key: reading_time TIMESTAMP ASC]
+    end
+
+    subgraph Write["Write Flow"]
+        W1[POST /api/sensors/:sensorId/readings] --> W2[Create SensorReadingKey]
+        W2 --> W3[Create SensorReading]
+        W3 --> W4[repository.save]
+        W4 --> W5[INSERT INTO sensor_readings<br/>VALUES sensor_id, reading_time, value, unit]
+    end
+
+    subgraph ReadRange["Read by Time Range"]
+        R1[GET /api/sensors/:id/readings/range?start=&end=] --> R2[findBySensorIdAndIdReadingTimeBetween]
+        R2 --> R3[SELECT * FROM sensor_readings<br/>WHERE sensor_id = ?<br/>AND reading_time >= ? AND reading_time <= ?<br/>ORDER BY reading_time ASC]
+    end
+
+    subgraph ReadLatest["Read Latest N"]
+        L1[GET /api/sensors/:id/readings/latest?limit=10] --> L2[findLatestReadings]
+        L2 --> L3[SELECT * FROM sensor_readings<br/>WHERE sensor_id = ?<br/>ORDER BY reading_time DESC LIMIT ?]
+    end
 ```
 
 ### Counter Table Flow (Metrics)
 
+```mermaid
+flowchart TD
+    subgraph Schema["Table: metrics_counters"]
+        S1[name TEXT - Primary Key]
+        S2[counter_value COUNTER]
+    end
+
+    subgraph Create["Create Counter"]
+        C1[POST /api/metrics] --> C2[UPDATE metrics_counters<br/>SET counter_value = counter_value + 0<br/>WHERE name = ?]
+    end
+
+    subgraph Increment["Increment"]
+        I1[PATCH /api/metrics/:name/increment?delta=5] --> I2[UPDATE metrics_counters<br/>SET counter_value = counter_value + 5<br/>WHERE name = ?]
+    end
+
+    subgraph Decrement["Decrement"]
+        D1[PATCH /api/metrics/:name/decrement?delta=1] --> D2[UPDATE metrics_counters<br/>SET counter_value = counter_value - 1<br/>WHERE name = ?]
+    end
+
+    style Schema fill:#f9f,stroke:#333
+    style Note fill:#ff9,stroke:#333
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    COUNTER TABLE FLOW                        │
-│                                                              │
-│  Table: metrics_counters                                    │
-│  ┌─────────────────────────────────────────────┐            │
-│  │ name TEXT (Primary Key)                     │            │
-│  │ counter_value COUNTER                       │            │
-│  └─────────────────────────────────────────────┘            │
-│                                                              │
-│  CREATE (if not exists):                                    │
-│  POST /api/metrics {"name": "page_views", "initialValue": 0}│
-│  ┌─────────────────────────────────────────────┐            │
-│  │ UPDATE metrics_counters                     │            │
-│  │ SET counter_value = counter_value + 0       │            │
-│  │ WHERE name = 'page_views'                   │            │
-│  └─────────────────────────────────────────────┘            │
-│                                                              │
-│  INCREMENT:                                                 │
-│  PATCH /api/metrics/page_views/increment?delta=5            │
-│  ┌─────────────────────────────────────────────┐            │
-│  │ UPDATE metrics_counters                     │            │
-│  │ SET counter_value = counter_value + 5       │            │
-│  │ WHERE name = 'page_views'                   │            │
-│  └─────────────────────────────────────────────┘            │
-│                                                              │
-│  DECREMENT:                                                 │
-│  PATCH /api/metrics/page_views/decrement?delta=1            │
-│  ┌─────────────────────────────────────────────┐            │
-│  │ UPDATE metrics_counters                     │            │
-│  │ SET counter_value = counter_value - 1       │            │
-│  │ WHERE name = 'page_views'                   │            │
-│  └─────────────────────────────────────────────┘            │
-│                                                              │
-│  NOTE: Counter columns can ONLY be incremented/decremented. │
-│        You cannot set them to an arbitrary value.           │
-└─────────────────────────────────────────────────────────────┘
-```
+
+> **Note:** Counter columns can ONLY be incremented/decremented. You cannot set them to an arbitrary value.
 
 ### TTL (Time-To-Live) Flow
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    TTL DATA FLOW                             │
-│                                                              │
-│  INSERT with TTL:                                           │
-│  POST /api/admin/ttl/log_entries                            │
-│  {"ttl": 300, "values": {...}}                              │
-│  ┌─────────────────────────────────────────────┐            │
-│  │ INSERT INTO log_entries (...)               │            │
-│  │ VALUES (...)                                │            │
-│  │ USING TTL 300                               │            │
-│  │                                             │            │
-│  │ Data auto-expires after 300 seconds         │            │
-│  └─────────────────────────────────────────────┘            │
-│                                                              │
-│  READ with TTL:                                             │
-│  GET /api/admin/ttl/log_entries                             │
-│  ┌─────────────────────────────────────────────┐            │
-│  │ SELECT *, TTL(id) as ttl                    │            │
-│  │ FROM log_entries                            │            │
-│  │                                             │            │
-│  │ Returns remaining TTL for each row          │            │
-│  └─────────────────────────────────────────────┘            │
-│                                                              │
-│  UPDATE TTL:                                                │
-│  PUT /api/admin/ttl/log_entries/{id}?ttlSeconds=600         │
-│  ┌─────────────────────────────────────────────┐            │
-│  │ 1. Read existing row                        │            │
-│  │ 2. Re-insert with new TTL                   │            │
-│  │    (TTL cannot be updated in-place)         │            │
-│  └─────────────────────────────────────────────┘            │
-└─────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph Insert["Insert with TTL"]
+        I1[POST /api/admin/ttl/:table] --> I2[INSERT INTO table (...)<br/>VALUES (...)<br/>USING TTL 300]
+        I2 --> I3[Data auto-expires after 300 seconds]
+    end
+
+    subgraph Read["Read with TTL"]
+        R1[GET /api/admin/ttl/:table] --> R2[SELECT *, TTL(id) as ttl<br/>FROM table]
+        R2 --> R3[Returns remaining TTL for each row]
+    end
+
+    subgraph Update["Update TTL"]
+        U1[PUT /api/admin/ttl/:table/:id?ttlSeconds=600] --> U2[Read existing row]
+        U2 --> U3[Re-insert with new TTL]
+        U3 --> U4[TTL cannot be updated in-place]
+    end
 ```
 
 ### Batch Write Flow
 
+```mermaid
+flowchart TD
+    A[POST /api/admin/batch/products] --> B[BatchService]
+    B --> C[Prepare INSERT statement]
+    C --> D[BEGIN UNLOGGED BATCH]
+    D --> E[For each item:<br/>Bind params to PreparedStatement<br/>Add to batch]
+    E --> F[APPLY BATCH]
+    F --> G[All items inserted]
+
+    style D fill:#f96,stroke:#333,color:#fff
+    style F fill:#f96,stroke:#333,color:#fff
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    BATCH WRITE FLOW                          │
-│                                                              │
-│  POST /api/admin/batch/products                             │
-│  [{product1}, {product2}, {product3}]                       │
-│                                                              │
-│  ┌─────────────────────────────────────────────┐            │
-│  │ BEGIN UNLOGGED BATCH                        │            │
-│  │                                             │            │
-│  │ APPLY BATCH                                 │            │
-│  └─────────────────────────────────────────────┘            │
-│                                                              │
-│  Implementation (BatchService):                             │
-│  ┌─────────────────────────────────────────────┐            │
-│  │ 1. Prepare INSERT statement                 │            │
-│  │ 2. BEGIN UNLOGGED BATCH                     │            │
-│  │ 3. For each item:                           │            │
-│  │    - Bind parameters to PreparedStatement   │            │
-│  │    - Add to batch                           │            │
-│  │ 4. APPLY BATCH                              │            │
-│  └─────────────────────────────────────────────┘            │
-│                                                              │
-│  NOTE: UNLOGGED batches do NOT guarantee atomicity.         │
-│        They are for performance, not for transactions.      │
-│        Use Lightweight Transactions (LWT) for atomicity.   │
-└─────────────────────────────────────────────────────────────┘
-```
+
+> **Note:** UNLOGGED batches do NOT guarantee atomicity across partitions. They are for performance, not for transactions.
 
 ### Lightweight Transaction (LWT) Flow
 
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant TC as TransactionController
+    participant TS as TransactionService
+    participant DB as Cassandra
+
+    Note over C,DB: Insert IF NOT EXISTS
+    C->>TC: POST /api/admin/transactions/insert-if-not-exists/products
+    TC->>TS: insertIfNotExists(table, keyColumn, keyValue, valueColumn, valueValue)
+    TS->>DB: INSERT INTO products (...) VALUES (...) IF NOT EXISTS
+    DB-->>TS: ResultSet [applied=true/false]
+    TS-->>C: {applied: true/false}
+
+    Note over C,DB: Compare and Set
+    C->>TC: PUT /api/admin/transactions/compare-and-set/products
+    TC->>TS: compareAndSet(table, keyColumn, keyValue, valueColumn, expectedValue, newValue)
+    TS->>DB: UPDATE products SET column = newValue WHERE id = ? IF column = expectedValue
+    DB-->>TS: ResultSet [applied=true/false]
+    TS-->>C: {applied: true/false}
+
+    Note over C,DB: Delete IF EXISTS
+    C->>TC: DELETE /api/admin/transactions/delete-if-exists/products/:id
+    TC->>TS: deleteIfExists(table, id)
+    TS->>DB: DELETE FROM products WHERE id = ? IF EXISTS
+    DB-->>TS: ResultSet [applied=true/false]
+    TS-->>C: {applied: true/false}
 ```
-┌─────────────────────────────────────────────────────────────┐
-│               LIGHTWEIGHT TRANSACTION FLOW                   │
-│                                                              │
-│  INSERT IF NOT EXISTS:                                      │
-│  POST /api/admin/transactions/insert-if-not-exists/products │
-│  ┌─────────────────────────────────────────────┐            │
-│  │ INSERT INTO products (id, name, ...)        │            │
-│  │ VALUES (...)                                │            │
-│  │ IF NOT EXISTS                               │            │
-│  │                                             │            │
-│  │ Returns: {applied: true/false}              │            │
-│  └─────────────────────────────────────────────┘            │
-│                                                              │
-│  COMPARE AND SET:                                           │
-│  PUT /api/admin/transactions/compare-and-set/products       │
-│  ┌─────────────────────────────────────────────┐            │
-│  │ UPDATE products                             │            │
-│  │ SET name = 'new_name'                       │            │
-│  │ WHERE id = ?                                │            │
-│  │ IF name = 'old_name'                        │            │
-│  │                                             │            │
-│  │ Returns: {applied: true/false}              │            │
-│  └─────────────────────────────────────────────┘            │
-│                                                              │
-│  DELETE IF EXISTS:                                          │
-│  DELETE /api/admin/transactions/delete-if-exists/prod/{id}  │
-│  ┌─────────────────────────────────────────────┐            │
-│  │ DELETE FROM products                        │            │
-│  │ WHERE id = ?                                │            │
-│  │ IF EXISTS                                   │            │
-│  │                                             │            │
-│  │ Returns: {applied: true/false}              │            │
-│  └─────────────────────────────────────────────┘            │
-│                                                              │
-│  NOTE: LWT uses Paxos consensus.                            │
-│        Performance cost: ~2x normal writes.                 │
-│        Not recommended for high-throughput scenarios.       │
-└─────────────────────────────────────────────────────────────┘
-```
+
+> **Note:** LWT uses Paxos consensus. Performance cost: ~2x normal writes. Not recommended for high-throughput scenarios.
 
 ### Collection Operations Flow
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                 COLLECTION OPERATIONS FLOW                   │
-│                                                              │
-│  ┌─────────────────────────────────────────────────┐        │
-│  │ LIST (ordered, allows duplicates)               │        │
-│  │                                                 │        │
-│  │ ADD:    UPDATE t SET list = list + ['a']        │        │
-│  │ PREPEND:UPDATE t SET list = ['a'] + list        │        │
-│  │ REMOVE: UPDATE t SET list = list - ['a']        │        │
-│  └─────────────────────────────────────────────────┘        │
-│                                                              │
-│  ┌─────────────────────────────────────────────────┐        │
-│  │ SET (unique, unordered)                         │        │
-│  │                                                 │        │
-│  │ ADD:    UPDATE t SET set = set + {'a'}          │        │
-│  │ REMOVE: UPDATE t SET set = set - {'a'}          │        │
-│  └─────────────────────────────────────────────────┘        │
-│                                                              │
-│  ┌─────────────────────────────────────────────────┐        │
-│  │ MAP (key-value pairs)                           │        │
-│  │                                                 │        │
-│  │ PUT:    UPDATE t SET map = map + {'k': 'v'}     │        │
-│  │ REMOVE: UPDATE t SET map = map - {'k'}          │        │
-│  └─────────────────────────────────────────────────┘        │
-│                                                              │
-│  Example: Add tags to an article                            │
-│  POST /api/admin/collections/articles/list/add              │
-│  {"idColumn": "id", "idValue": "<uuid>",                    │
-│   "listColumn": "categories", "values": ["tech", "java"]}   │
-└─────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart LR
+    subgraph List["LIST (ordered, allows duplicates)"]
+        L1["ADD: UPDATE t SET list = list + ['a']"]
+        L2["PREPEND: UPDATE t SET list = ['a'] + list"]
+        L3["REMOVE: UPDATE t SET list = list - ['a']"]
+    end
+
+    subgraph Set["SET (unique, unordered)"]
+        S1["ADD: UPDATE t SET set = set + {'a'}"]
+        S2["REMOVE: UPDATE t SET set = set - {'a'}"]
+    end
+
+    subgraph Map["MAP (key-value pairs)"]
+        M1["PUT: UPDATE t SET map = map + {'k': 'v'}"]
+        M2["REMOVE: UPDATE t SET map = map - {'k'}"]
+    end
+
+    style List fill:#e1f5fe
+    style Set fill:#f3e5f5
+    style Map fill:#e8f5e9
 ```
 
 ### SASI Index Flow
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                   SASI INDEX FLOW                            │
-│                                                              │
-│  SASI = Specific Authorized Secondary Index                 │
-│  Supports: CONTAINS, PREFIX, SPARSE modes                   │
-│                                                              │
-│  CONTAINS (full-text search):                               │
-│  POST /api/admin/sasi/cassandra_app/products                │
-│  {"column": "name"}                                         │
-│  ┌─────────────────────────────────────────────┐            │
-│  │ CREATE CUSTOM INDEX ON products (name)      │            │
-│  │ USING 'org.apache.cassandra.index.sasi.    │            │
-│  │        SASIIndex'                           │            │
-│  │ WITH OPTIONS = {                            │            │
-│  │   'mode': 'CONTAINS',                      │            │
-│  │   'analyzer_class': '...StandardAnalyzer'  │            │
-│  │ };                                          │            │
-│  └─────────────────────────────────────────────┘            │
-│                                                              │
-│  PREFIX (autocomplete):                                     │
-│  POST /api/admin/sasi/cassandra_app/products/prefix         │
-│  {"column": "name"}                                         │
-│  ┌─────────────────────────────────────────────┐            │
-│  │ WITH OPTIONS = {                            │            │
-│  │   'mode': 'PREFIX',                         │            │
-│  │   'analyzer_class': '...NonTokenizingAnalyzer'│           │
-│  │ };                                          │            │
-│  └─────────────────────────────────────────────┘            │
-│                                                              │
-│  SPARSE (for low-cardinality columns):                      │
-│  POST /api/admin/sasi/cassandra_app/products/sparse         │
-│  {"column": "category"}                                     │
-│  ┌─────────────────────────────────────────────┐            │
-│  │ WITH OPTIONS = {                            │            │
-│  │   'mode': 'SPARSE'                          │            │
-│  │ };                                          │            │
-│  └─────────────────────────────────────────────┘            │
-└─────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    A[SASI Index Types] --> B[CONTAINS - Full-text search]
+    A --> C[PREFIX - Autocomplete]
+    A --> D[SPARSE - Low-cardinality columns]
+
+    B --> B1["CREATE CUSTOM INDEX ON table (column)<br/>USING 'SASIIndex'<br/>WITH OPTIONS = {'mode': 'CONTAINS'}"]
+    C --> C1["CREATE CUSTOM INDEX ON table (column)<br/>USING 'SASIIndex'<br/>WITH OPTIONS = {'mode': 'PREFIX'}"]
+    D --> D1["CREATE CUSTOM INDEX ON table (column)<br/>USING 'SASIIndex'<br/>WITH OPTIONS = {'mode': 'SPARSE'}"]
+
+    style B fill:#bbdefb
+    style C fill:#c8e6c9
+    style D fill:#ffe0b2
 ```
 
 ### Advanced Query Flow (Consistency Levels)
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│             CONSISTENCY LEVEL QUERY FLOW                     │
-│                                                              │
-│  POST /api/admin/advanced/query/consistency/QUORUM           │
-│  {"cql": "SELECT * FROM products WHERE category = 'tech'"}  │
-│                                                              │
-│  ┌─────────────────────────────────────────────┐            │
-│  │ 1. Parse consistency level from URL         │            │
-│  │    (ONE, QUORUM, ALL, LOCAL_QUORUM)         │            │
-│  │ 2. Create SimpleStatement from CQL          │            │
-│  │ 3. Set consistency on statement             │            │
-│  │ 4. Execute via CqlSession                   │            │
-│  │ 5. Return results as List<Map>              │            │
-│  └─────────────────────────────────────────────┘            │
-│                                                              │
-│  Consistency Levels:                                        │
-│  ┌─────────────────────────────────────────────┐            │
-│  │ ONE          - 1 replica must respond       │            │
-│  │ QUORUM       - (RF/2)+1 replicas respond    │            │
-│  │ ALL          - All replicas must respond    │            │
-│  │ LOCAL_QUORUM - (RF/2)+1 in local DC         │            │
-│  └─────────────────────────────────────────────┘            │
-│                                                              │
-│  Trade-off:                                                 │
-│  Higher consistency = More latency + Higher availability    │
-│  Lower consistency  = Less latency  + Lower availability   │
-└─────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    A[POST /api/admin/advanced/query/consistency/QUORUM] --> B[Parse consistency level from URL]
+    B --> C[Create SimpleStatement from CQL]
+    C --> D[Set consistency on statement]
+    D --> E[Execute via CqlSession]
+    E --> F[Return results as List of Map]
+
+    subgraph Levels["Consistency Levels"]
+        L1[ONE - 1 replica must respond]
+        L2[QUORUM - (RF/2)+1 replicas respond]
+        L3[ALL - All replicas must respond]
+        L4[LOCAL_QUORUM - (RF/2)+1 in local DC]
+    end
+
+    G[Trade-off] --> H[Higher consistency = More latency + Higher availability]
+    G --> I[Lower consistency = Less latency + Lower availability]
+
+    style Levels fill:#fff3e0
 ```
 
 ### Token Range Query Flow
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                TOKEN RANGE QUERY FLOW                        │
-│                                                              │
-│  GET /api/admin/advanced/token-range/products/name           │
-│      ?startToken=-9223372036854775808                       │
-│      &endToken=0                                            │
-│                                                              │
-│  ┌─────────────────────────────────────────────┐            │
-│  │ 1. Cassandra assigns token to each row      │            │
-│  │    based on partition key                    │            │
-│  │ 2. Token range query scans specific         │            │
-│  │    partition range                          │            │
-│  │ 3. More efficient than full table scan      │            │
-│  └─────────────────────────────────────────────┘            │
-│                                                              │
-│  CQL Generated:                                             │
-│  SELECT * FROM products                                     │
-│  WHERE token(name) > -9223372036854775808                   │
-│  AND token(name) <= 0                                       │
-│                                                              │
-│  Use Case:                                                  │
-│  - Data migration between nodes                             │
-│  - Debugging partition distribution                         │
-│  - Range-based data analysis                                │
-└─────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    A[GET /api/admin/advanced/token-range/products/name] --> B[Cassandra assigns token to each row based on partition key]
+    B --> C[Token range query scans specific partition range]
+    C --> D[More efficient than full table scan]
+
+    E[Generated CQL] --> F["SELECT * FROM products<br/>WHERE token(name) > -9223372036854775808<br/>AND token(name) <= 0"]
+
+    G[Use Cases] --> H[Data migration between nodes]
+    G --> I[Debugging partition distribution]
+    G --> J[Range-based data analysis]
 ```
 
 ---
