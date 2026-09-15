@@ -263,25 +263,25 @@ sequenceDiagram
 ```mermaid
 flowchart TD
     subgraph CompositeKey["Composite Primary Key"]
-        PK[Partition Key: sensor_id UUID]
-        CK[Clustering Key: reading_time TIMESTAMP ASC]
+        PK["Partition Key: sensor_id UUID"]
+        CK["Clustering Key: reading_time TIMESTAMP ASC"]
     end
 
     subgraph Write["Write Flow"]
-        W1[POST /api/sensors/:sensorId/readings] --> W2[Create SensorReadingKey]
-        W2 --> W3[Create SensorReading]
-        W3 --> W4[repository.save]
-        W4 --> W5[INSERT INTO sensor_readings<br/>VALUES sensor_id, reading_time, value, unit]
+        W1["POST /api/sensors/:sensorId/readings"] --> W2["Create SensorReadingKey"]
+        W2 --> W3["Create SensorReading"]
+        W3 --> W4["repository.save"]
+        W4 --> W5["INSERT INTO sensor_readings VALUES sensor_id, reading_time, value, unit"]
     end
 
     subgraph ReadRange["Read by Time Range"]
-        R1[GET /api/sensors/:id/readings/range?start=&end=] --> R2[findBySensorIdAndIdReadingTimeBetween]
-        R2 --> R3[SELECT * FROM sensor_readings<br/>WHERE sensor_id = ?<br/>AND reading_time >= ? AND reading_time <= ?<br/>ORDER BY reading_time ASC]
+        R1["GET /api/sensors/:id/readings/range?start=&end="] --> R2["findBySensorIdAndIdReadingTimeBetween"]
+        R2 --> R3["SELECT * FROM sensor_readings WHERE sensor_id = ? AND reading_time BETWEEN ? AND ? ORDER BY reading_time ASC"]
     end
 
     subgraph ReadLatest["Read Latest N"]
-        L1[GET /api/sensors/:id/readings/latest?limit=10] --> L2[findLatestReadings]
-        L2 --> L3[SELECT * FROM sensor_readings<br/>WHERE sensor_id = ?<br/>ORDER BY reading_time DESC LIMIT ?]
+        L1["GET /api/sensors/:id/readings/latest?limit=10"] --> L2["findLatestReadings"]
+        L2 --> L3["SELECT * FROM sensor_readings WHERE sensor_id = ? ORDER BY reading_time DESC LIMIT ?"]
     end
 ```
 
@@ -290,24 +290,21 @@ flowchart TD
 ```mermaid
 flowchart TD
     subgraph Schema["Table: metrics_counters"]
-        S1[name TEXT - Primary Key]
-        S2[counter_value COUNTER]
+        S1["name TEXT - Primary Key"]
+        S2["counter_value COUNTER"]
     end
 
     subgraph Create["Create Counter"]
-        C1[POST /api/metrics] --> C2[UPDATE metrics_counters<br/>SET counter_value = counter_value + 0<br/>WHERE name = ?]
+        C1["POST /api/metrics"] --> C2["UPDATE metrics_counters SET counter_value = counter_value + 0 WHERE name = ?"]
     end
 
     subgraph Increment["Increment"]
-        I1[PATCH /api/metrics/:name/increment?delta=5] --> I2[UPDATE metrics_counters<br/>SET counter_value = counter_value + 5<br/>WHERE name = ?]
+        I1["PATCH /api/metrics/:name/increment?delta=5"] --> I2["UPDATE metrics_counters SET counter_value = counter_value + 5 WHERE name = ?"]
     end
 
     subgraph Decrement["Decrement"]
-        D1[PATCH /api/metrics/:name/decrement?delta=1] --> D2[UPDATE metrics_counters<br/>SET counter_value = counter_value - 1<br/>WHERE name = ?]
+        D1["PATCH /api/metrics/:name/decrement?delta=1"] --> D2["UPDATE metrics_counters SET counter_value = counter_value - 1 WHERE name = ?"]
     end
-
-    style Schema fill:#f9f,stroke:#333
-    style Note fill:#ff9,stroke:#333
 ```
 
 > **Note:** Counter columns can ONLY be incremented/decremented. You cannot set them to an arbitrary value.
@@ -317,19 +314,19 @@ flowchart TD
 ```mermaid
 flowchart TD
     subgraph Insert["Insert with TTL"]
-        I1[POST /api/admin/ttl/:table] --> I2[INSERT INTO table (...)<br/>VALUES (...)<br/>USING TTL 300]
-        I2 --> I3[Data auto-expires after 300 seconds]
+        I1["POST /api/admin/ttl/:table"] --> I2["INSERT INTO table (...) VALUES (...) USING TTL 300"]
+        I2 --> I3["Data auto-expires after 300 seconds"]
     end
 
     subgraph Read["Read with TTL"]
-        R1[GET /api/admin/ttl/:table] --> R2[SELECT *, TTL(id) as ttl<br/>FROM table]
-        R2 --> R3[Returns remaining TTL for each row]
+        R1["GET /api/admin/ttl/:table"] --> R2["SELECT *, TTL(id) as ttl FROM table"]
+        R2 --> R3["Returns remaining TTL for each row"]
     end
 
     subgraph Update["Update TTL"]
-        U1[PUT /api/admin/ttl/:table/:id?ttlSeconds=600] --> U2[Read existing row]
-        U2 --> U3[Re-insert with new TTL]
-        U3 --> U4[TTL cannot be updated in-place]
+        U1["PUT /api/admin/ttl/:table/:id?ttlSeconds=600"] --> U2["Read existing row"]
+        U2 --> U3["Re-insert with new TTL"]
+        U3 --> U4["TTL cannot be updated in-place"]
     end
 ```
 
@@ -337,15 +334,12 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    A[POST /api/admin/batch/products] --> B[BatchService]
-    B --> C[Prepare INSERT statement]
-    C --> D[BEGIN UNLOGGED BATCH]
-    D --> E[For each item:<br/>Bind params to PreparedStatement<br/>Add to batch]
-    E --> F[APPLY BATCH]
-    F --> G[All items inserted]
-
-    style D fill:#f96,stroke:#333,color:#fff
-    style F fill:#f96,stroke:#333,color:#fff
+    A["POST /api/admin/batch/products"] --> B["BatchService"]
+    B --> C["Prepare INSERT statement"]
+    C --> D["BEGIN UNLOGGED BATCH"]
+    D --> E["For each item: Bind params to PreparedStatement, Add to batch"]
+    E --> F["APPLY BATCH"]
+    F --> G["All items inserted"]
 ```
 
 > **Note:** UNLOGGED batches do NOT guarantee atomicity across partitions. They are for performance, not for transactions.
@@ -387,80 +381,70 @@ sequenceDiagram
 
 ```mermaid
 flowchart LR
-    subgraph List["LIST (ordered, allows duplicates)"]
+    subgraph List["LIST - ordered, allows duplicates"]
         L1["ADD: UPDATE t SET list = list + ['a']"]
         L2["PREPEND: UPDATE t SET list = ['a'] + list"]
         L3["REMOVE: UPDATE t SET list = list - ['a']"]
     end
 
-    subgraph Set["SET (unique, unordered)"]
+    subgraph Set["SET - unique, unordered"]
         S1["ADD: UPDATE t SET set = set + {'a'}"]
         S2["REMOVE: UPDATE t SET set = set - {'a'}"]
     end
 
-    subgraph Map["MAP (key-value pairs)"]
+    subgraph Map["MAP - key-value pairs"]
         M1["PUT: UPDATE t SET map = map + {'k': 'v'}"]
         M2["REMOVE: UPDATE t SET map = map - {'k'}"]
     end
-
-    style List fill:#e1f5fe
-    style Set fill:#f3e5f5
-    style Map fill:#e8f5e9
 ```
 
 ### SASI Index Flow
 
 ```mermaid
 flowchart TD
-    A[SASI Index Types] --> B[CONTAINS - Full-text search]
-    A --> C[PREFIX - Autocomplete]
-    A --> D[SPARSE - Low-cardinality columns]
+    A["SASI Index Types"] --> B["CONTAINS - Full-text search"]
+    A --> C["PREFIX - Autocomplete"]
+    A --> D["SPARSE - Low-cardinality columns"]
 
-    B --> B1["CREATE CUSTOM INDEX ON table (column)<br/>USING 'SASIIndex'<br/>WITH OPTIONS = {'mode': 'CONTAINS'}"]
-    C --> C1["CREATE CUSTOM INDEX ON table (column)<br/>USING 'SASIIndex'<br/>WITH OPTIONS = {'mode': 'PREFIX'}"]
-    D --> D1["CREATE CUSTOM INDEX ON table (column)<br/>USING 'SASIIndex'<br/>WITH OPTIONS = {'mode': 'SPARSE'}"]
-
-    style B fill:#bbdefb
-    style C fill:#c8e6c9
-    style D fill:#ffe0b2
+    B --> B1["CREATE CUSTOM INDEX ON table (column) USING SASIIndex WITH OPTIONS = {'mode': 'CONTAINS'}"]
+    C --> C1["CREATE CUSTOM INDEX ON table (column) USING SASIIndex WITH OPTIONS = {'mode': 'PREFIX'}"]
+    D --> D1["CREATE CUSTOM INDEX ON table (column) USING SASIIndex WITH OPTIONS = {'mode': 'SPARSE'}"]
 ```
 
 ### Advanced Query Flow (Consistency Levels)
 
 ```mermaid
 flowchart TD
-    A[POST /api/admin/advanced/query/consistency/QUORUM] --> B[Parse consistency level from URL]
-    B --> C[Create SimpleStatement from CQL]
-    C --> D[Set consistency on statement]
-    D --> E[Execute via CqlSession]
-    E --> F[Return results as List of Map]
+    A["POST /api/admin/advanced/query/consistency/QUORUM"] --> B["Parse consistency level from URL"]
+    B --> C["Create SimpleStatement from CQL"]
+    C --> D["Set consistency on statement"]
+    D --> E["Execute via CqlSession"]
+    E --> F["Return results as List of Map"]
 
     subgraph Levels["Consistency Levels"]
-        L1[ONE - 1 replica must respond]
-        L2[QUORUM - (RF/2)+1 replicas respond]
-        L3[ALL - All replicas must respond]
-        L4[LOCAL_QUORUM - (RF/2)+1 in local DC]
+        L1["ONE - 1 replica must respond"]
+        L2["QUORUM - majority of replicas respond"]
+        L3["ALL - All replicas must respond"]
+        L4["LOCAL_QUORUM - majority in local DC"]
     end
 
-    G[Trade-off] --> H[Higher consistency = More latency + Higher availability]
-    G --> I[Lower consistency = Less latency + Lower availability]
-
-    style Levels fill:#fff3e0
+    G["Trade-off"] --> H["Higher consistency = More latency + Higher availability"]
+    G --> I["Lower consistency = Less latency + Lower availability"]
 ```
 
 ### Token Range Query Flow
 
 ```mermaid
 flowchart TD
-    A[GET /api/admin/advanced/token-range/products/name] --> B[Cassandra assigns token to each row based on partition key]
-    B --> C[Token range query scans specific partition range]
-    C --> D[More efficient than full table scan]
+    A["GET /api/admin/advanced/token-range/products/name"] --> B["Cassandra assigns token to each row based on partition key"]
+    B --> C["Token range query scans specific partition range"]
+    C --> D["More efficient than full table scan"]
 
-    E[Generated CQL] --> F["SELECT * FROM products<br/>WHERE token(name) > -9223372036854775808<br/>AND token(name) <= 0"]
+    E["Generated CQL"] --> F["SELECT * FROM products WHERE token(name) > -9223372036854775808 AND token(name) <= 0"]
 
-    G[Use Cases] --> H[Data migration between nodes]
-    G --> I[Debugging partition distribution]
-    G --> J[Range-based data analysis]
+    G["Use Cases"] --> H["Data migration between nodes"]
+    G --> I["Debugging partition distribution"]
+    G --> J["Range-based data analysis"]
 ```
 
 ---
