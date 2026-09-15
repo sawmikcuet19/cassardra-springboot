@@ -1,0 +1,34 @@
+spring:
+  application:
+    name: cassandra
+  cassandra:
+    contact-points: localhost
+    port: 9042
+    local-datacenter: dc1
+    schema-action: create_if_not_exists
+    username: cassandra
+    password: password
+
+server:
+  port: 8080
+
+app:
+  cors:
+    allowed-origins: http://localhost:3000
+  jwt:
+    secret: 404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970
+    expiration-ms: 86400000
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,beans,cassandra
+  endpoint:
+    health:
+      show-details: always
+
+logging:
+  level:
+    org.springframework.data.cassandra: DEBUG
+    com.datastax.oss.driver: WARN
